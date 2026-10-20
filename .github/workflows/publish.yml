@@ -1,20 +1,46 @@
-name: Publish to NPM 
+name: Publish npm
 
 on:
   push:
-    tags:
-      - '*'
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
 
 jobs:
-  publish-npm:
-    runs-on: ubuntu-latest
+  publish:
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-node@v3
-      with:
-        node-version: '16'
-        registry-url: 'https://registry.npmjs.org'
-    - run: npm ci
-    - run: npm publish --access public
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.0'
+      - name: Verify release tag
+        run: node -e 'const p=require("./package.json"); if(p.name!=="kebele" || (process.env.GITHUB_EVENT_NAME!=="workflow_dispatch" && process.env.GITHUB_REF_NAME!==("v"+p.version))) throw Error("Tag must match the kebele package version");'
+      - run: npm install -g npm@11.16.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: npm pack --pack-destination "$RUNNER_TEMP"
+      - name: Smoke-test packed CLI
+        run: |
+          mkdir -p "$RUNNER_TEMP/kebele-smoke"
+          npm install --prefix "$RUNNER_TEMP/kebele-smoke" "$RUNNER_TEMP/kebele-$(node -p 'require("./package.json").version').tgz"
+          "$RUNNER_TEMP/kebele-smoke/node_modules/.bin/kebele" --version
+          "$RUNNER_TEMP/kebele-smoke/node_modules/.bin/kebele" doctor
+      - name: Publish through npm trusted publisher
+        run: npm publish "$RUNNER_TEMP/kebele-$(node -p 'require("./package.json").version').tgz" --access public
