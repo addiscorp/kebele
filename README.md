@@ -1,54 +1,80 @@
-a simple way to start docker containers and watch for updates to the source image
+# kebele
 
-think of it as an easy way to interface with `docker` & `cron`
+Run and manage Docker container stacks. kebele talks to Docker over its unix socket; it doesn't need the `docker` CLI or `docker compose`.
 
+It's the container layer for Addis tools: [simien](https://github.com/simienapp/cli) calls it to run each project's Postgres and Zega. Its siblings are [woreda](https://github.com/addiscorp/woreda) (GitHub Actions runners) and mirab (virtual machines and agents).
 
-## install
+Built for agents first: every command prints JSON, and `--human` prints text for people. A failure is JSON on stderr and exit code 1.
 
-`npm install -g kebele`
+## Install
 
-*the alias* `kb` *will be added if available on your system*
+```sh
+bun add -g kebele        # or: npm install -g kebele (needs Bun on PATH)
+kebele doctor
+```
 
+kebele finds Docker the way the `docker` CLI does: first the current `docker context`, then the usual sockets for Docker Desktop, OrbStack, Colima and Rancher Desktop. Pass `--socket <path>` to choose one.
 
-## usage
-`kebele config` - configure runtime settings
+## A stack
 
-`kebele add` - setup a new container
+```json
+{
+  "name": "shop",
+  "services": {
+    "db": {
+      "image": "postgres:17",
+      "env": { "POSTGRES_PASSWORD": "..." },
+      "ports": [{ "host": 5433, "container": 5432 }],
+      "volumes": [{ "volume": "pgdata", "path": "/var/lib/postgresql/data" }],
+      "health": { "command": ["pg_isready", "-U", "postgres"] }
+    },
+    "api": {
+      "image": "shop-api:1.2",
+      "dependsOn": ["db"]
+    }
+  }
+}
+```
 
-`kebele status` - list all docker containers
+- Services start in dependency order. Each one must be ready before the next starts: healthy if it has a health check, otherwise running steadily.
+- Services reach each other by name (`db`) on the stack's own network.
+- Ports bind to `127.0.0.1` unless you give an `ip`.
+- Volumes are named `<stack>_<volume>` and survive `down`.
+- `up` is idempotent. An unchanged service is left alone. A changed service (image, command, env, ports, volumes or health) is replaced.
 
+## Commands
 
-## features
+| command | does |
+|---|---|
+| `kebele up [file]` | start or update the stack in `file` (default `kebele.json`), with one JSON event per step |
+| `kebele down <stack \| file> [--volumes]` | remove the containers and network; `--volumes` also deletes the data |
+| `kebele ls` | every stack kebele manages on this machine |
+| `kebele status <stack>` | each service's state, health and ports |
+| `kebele logs <stack> [service] [--tail N] [-f]` | output, as `{service, stream, text}` lines |
+| `kebele port <port>` | who holds a port: a container (and its stack), a program outside Docker, or nobody |
+| `kebele doctor` | which socket, which Docker |
 
-- [x] Start new container with user provided settings
-- [x] Get currently running docker containers
-- [ ] Get currently running cron jobs
-- [ ] Create cron job based on user schedule
-- [ ] Display summary of commands that were run for docker + cron during init
-- [ ] Send http webhook when container upgrade done
-- [ ] Modify running cron jobs
+When a port is taken, `up` says by whom, e.g. `port 5433 for db is already taken by container shop-db (stack shop)`. A service that exits while starting reports its exit code and its last 20 lines of output.
 
+## As a library
 
-## os support
+```ts
+import { Docker, up, down, status } from 'kebele'
 
-- [x] Linux
-- [ ] macOS
-- [ ] Windows
+const docker = new Docker()
+await up(docker, stack, { onEvent: (e) => console.log(e) })
+```
 
+## Develop
 
-## security
+```sh
+bun install
+bun run typecheck
+bun test        # runs against your local Docker
+```
 
-communication with docker is done over its unix socket, **you do not need to enable http on port 2375**.
+Releases publish from a `vX.Y.Z` tag through npm trusted publishing (`.github/workflows/publish.yml`, environment `release`).
 
-docker API poses security concerns if your server is exposed to public internet without security protections in place.
+## License
 
-the `config` wizard will do what it can to detect environment settings and suggest changes.
-
-once kebele nears **v1.0**, work will be done to automate the process of creating a CA and installing certificates. this is so your server that is running the docker containers adheres to the [security best practices](https://docs.docker.com/engine/security/protect-access/) recommended by the docker team. there will also be testing done to ensure kebele works if the server is setup to [run docker as a non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
-
-if you have any recommendations for security best practices that can be incorporated into this cli tool, [please submit an issue](https://github.com/samifouad/kebele/issues).
-
-
-## contribute
-
-contributions are welcome! please keep in mind this is going to remain extremely simple to avoid tech debt and to ensure maintinence is easy long into the future.
+Apache-2.0
