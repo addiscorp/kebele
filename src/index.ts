@@ -8,6 +8,7 @@ export {
   logs,
   networkName,
   portOwner,
+  pull,
   status,
   up,
   volumeName,

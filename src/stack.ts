@@ -255,6 +255,39 @@ export async function up(
   return status(docker, stack.name)
 }
 
+/**
+ * Pull every image the stack names, and remove each container still running an older copy of
+ * its image, so the next `up` starts it on the new one. Volumes, and the data in them, stay.
+ */
+export async function pull(
+  docker: Docker,
+  stack: Stack,
+  options: { onEvent?: (event: UpEvent) => void } = {},
+): Promise<{ images: { image: string; id: string }[]; replaced: string[] }> {
+  validate(stack)
+  const emit = options.onEvent ?? (() => {})
+  const images: { image: string; id: string }[] = []
+  for (const image of new Set(Object.values(stack.services).map((service) => service.image))) {
+    emit({ event: 'pull', image })
+    await docker.pull(image)
+    const id = await docker.imageId(image)
+    if (!id) throw new KebeleError(`pulled ${image} but Docker doesn't have it`, { image })
+    images.push({ image, id })
+  }
+  const replaced: string[] = []
+  for (const [name, service] of Object.entries(stack.services)) {
+    const container = containerName(stack.name, name)
+    const running = await docker.inspect(container)
+    const latest = images.find((entry) => entry.image === service.image)!.id
+    if (running && running.Image !== latest) {
+      emit({ event: 'replace', service: name })
+      await docker.remove(container)
+      replaced.push(name)
+    }
+  }
+  return { images, replaced: replaced.sort() }
+}
+
 async function start(docker: Docker, container: string, name: string, service: Service): Promise<void> {
   try {
     await docker.start(container)
