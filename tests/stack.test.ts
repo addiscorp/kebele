@@ -2,7 +2,7 @@
 
 import { afterAll, expect, test } from 'bun:test'
 
-import { Docker, down, list, logs, portOwner, status, up, volumeName, type Stack, type UpEvent } from '../src/index.ts'
+import { Docker, down, list, logs, portOwner, pull, status, up, volumeName, type Stack, type UpEvent } from '../src/index.ts'
 
 const docker = new Docker()
 const name = `kebele-test-${process.pid}`
@@ -83,6 +83,31 @@ test('logs and status read one stack; ls lists it', async () => {
   expect((await list(docker)).map((s) => s.name)).toContain(name)
   expect((await status(docker, `${name}-none`)).services).toEqual([])
 })
+
+test('pull replaces only containers running an older copy of their image, keeping the data', async () => {
+  await up(docker, stack())
+  const webBefore = await id('web')
+  // Nothing is out of date: nothing is replaced.
+  expect((await pull(docker, stack())).replaced).toEqual([])
+  expect(await id('web')).toBe(webBefore)
+
+  // The worker container now runs an older image under the same name and labels.
+  const worker = (await docker.inspect(`${name}-worker`))!
+  await docker.pull('busybox:1.36')
+  await docker.remove(worker.Id)
+  await docker.create(`${name}-worker`, { Image: 'busybox:1.36', Cmd: ['sleep', '3600'], Labels: worker.Config.Labels })
+  const events: UpEvent[] = []
+  const done = await pull(docker, stack(), { onEvent: (e) => events.push(e) })
+  expect(done.replaced).toEqual(['worker'])
+  expect(events).toContainEqual({ event: 'replace', service: 'worker' })
+  expect(await docker.inspect(`${name}-worker`)).toBeUndefined()
+  expect(await id('web')).toBe(webBefore)
+
+  // up brings it back on the stack's image; web's data was never touched.
+  await up(docker, stack())
+  expect((await docker.inspect(`${name}-worker`))!.Image).toBe((await docker.imageId(IMAGE))!)
+  expect(await (await fetch(`http://127.0.0.1:${PORT}/`)).text()).toBe('hello\n')
+}, 120_000)
 
 test('a taken port names its holder', async () => {
   expect(await portOwner(docker, PORT)).toEqual({ port: PORT, free: false, container: `${name}-web`, stack: name, service: 'web' })

@@ -47,6 +47,7 @@ kebele finds Docker the way the `docker` CLI does: first the current `docker con
 | command | does |
 |---|---|
 | `kebele up [file]` | start or update the stack in `file` (default `kebele.json`), with one JSON event per step |
+| `kebele pull [file]` | pull the stack's images and remove containers still running older ones (data stays); `up` then starts them on the new images |
 | `kebele down <stack \| file> [--volumes]` | remove the containers and network; `--volumes` also deletes the data |
 | `kebele ls` | every stack kebele manages on this machine |
 | `kebele status <stack>` | each service's state, health and ports |

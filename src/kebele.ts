@@ -8,7 +8,7 @@ import { Command } from 'commander'
 import pkg from '../package.json' with { type: 'json' }
 import { Docker, KebeleError } from './docker.ts'
 import { event, failure, result, type Globals } from './output.ts'
-import { down, list, logs, portOwner, status, up, type Stack, type StackStatus } from './stack.ts'
+import { down, list, logs, portOwner, pull, status, up, type Stack, type StackStatus } from './stack.ts'
 
 const program = new Command()
   .name('kebele')
@@ -80,6 +80,22 @@ program
         onEvent: (e) => event(e, globals(), () => ('image' in e ? `pulling ${e.image}` : `${e.event} ${e.service}`)),
       })
       event({ event: 'up', ...done }, globals(), () => describe(done))
+    }),
+  )
+
+program
+  .command('pull')
+  .description("pull a stack's images and remove containers still running older ones (data stays); `up` then starts them on the new images")
+  .argument('[file]', 'stack description', 'kebele.json')
+  .action(
+    action(async (file: string) => {
+      const stack = readStack(file)
+      const done = await pull(docker(), stack, {
+        onEvent: (e) => event(e, globals(), () => ('image' in e ? `pulling ${e.image}` : `${e.event} ${e.service}`)),
+      })
+      result({ ok: true, ...done }, globals(), () =>
+        done.replaced.length ? `replaced ${done.replaced.join(', ')}; run up to start them` : 'every container already runs the newest images',
+      )
     }),
   )
 

@@ -72,6 +72,8 @@ export interface ContainerSummary {
 export interface ContainerInspect {
   Id: string
   Name: string
+  /** The id of the image bytes the container runs. */
+  Image: string
   Config: { Image: string; Labels: Record<string, string> }
   State: { Status: string; Running: boolean; ExitCode: number; Error: string; StartedAt: string; Health?: { Status: string } }
   NetworkSettings: { Ports: Record<string, { HostIp: string; HostPort: string }[] | null> }
@@ -138,6 +140,16 @@ export class Docker {
     const response = await this.request('GET', `/images/${encodeURIComponent(ref)}/json`, { ok: [200, 404] })
     await response.body?.cancel()
     return response.status === 200
+  }
+
+  /** The id of the image `ref` names on this machine, if it is here. */
+  async imageId(ref: string): Promise<string | undefined> {
+    const response = await this.request('GET', `/images/${encodeURIComponent(ref)}/json`, { ok: [200, 404] })
+    if (response.status === 404) {
+      await response.body?.cancel()
+      return undefined
+    }
+    return ((await response.json()) as { Id: string }).Id
   }
 
   /** Pull an image. Docker reports a failed pull inside a 200 stream, so every line is checked. */
