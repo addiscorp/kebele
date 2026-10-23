@@ -20,3 +20,15 @@ jobs:
       - run: bun run typecheck
       # Runs against the runner's Docker.
       - run: bun test
+      # The published JavaScript runs on Node (and Simien), not only Bun:
+      # built, packed and installed as a user gets it, then run against Docker.
+      - run: bun run build
+      - name: kebele on Node, installed from its package
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/app" && cd "$RUNNER_TEMP/app"
+          echo '{ "name": "app", "private": true }' > package.json
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/kebele-*.tgz
+          node --version
+          ./node_modules/.bin/kebele --version
+          ./node_modules/.bin/kebele ls

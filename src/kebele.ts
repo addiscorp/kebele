@@ -1,14 +1,16 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // kebele: containers for Addis tools. Agent-first: JSON out by default, --human for people.
 
 import { readFileSync } from 'node:fs'
 
 import { Command } from 'commander'
 
-import pkg from '../package.json' with { type: 'json' }
 import { Docker, KebeleError } from './docker.ts'
 import { event, failure, result, type Globals } from './output.ts'
 import { down, list, logs, portOwner, pull, status, up, type Stack, type StackStatus } from './stack.ts'
+
+// One level up from src/ and from dist/ alike.
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
 
 const program = new Command()
   .name('kebele')

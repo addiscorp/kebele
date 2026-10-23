@@ -202,7 +202,7 @@ async function waitReady(docker: Docker, stack: string, name: string, service: S
     if (Date.now() > deadline) {
       throw new KebeleError(`${name} wasn't ready after ${Math.round(timeoutMs / 1000)}s`, { service: name, health: state.Health?.Status ?? state.Status })
     }
-    await Bun.sleep(250)
+    await new Promise((resolve) => setTimeout(resolve, 250))
   }
 }
 
