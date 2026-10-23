@@ -2,27 +2,29 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
+import { request } from 'node:http'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 
 /** Docker Engine 25 and later speak this version. */
 const API = '/v1.44'
 
 export class KebeleError extends Error {
-  constructor(
-    message: string,
-    readonly details: Record<string, unknown> = {},
-  ) {
+  readonly details: Record<string, unknown>
+
+  constructor(message: string, details: Record<string, unknown> = {}) {
     super(message)
+    this.details = details
   }
 }
 
 export class DockerError extends KebeleError {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
+  readonly status: number | undefined
+
+  constructor(message: string, status?: number) {
     super(message, status === undefined ? {} : { status })
+    this.status = status
   }
 }
 
@@ -94,6 +96,42 @@ type Query = Record<string, string | number | boolean | undefined>
 /** `{ label: ["a=b"] }` as Docker's `filters` query parameter. */
 const filters = (value: Record<string, string[]>) => JSON.stringify(value)
 
+/**
+ * One HTTP request over the unix socket, with node:http (Node, Bun and
+ * Simien all have it), as a web Response so callers read it the same way.
+ */
+function overSocket(socket: string, method: string, url: URL, body: unknown): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const sent = body === undefined ? undefined : JSON.stringify(body)
+    const req = request(
+      {
+        socketPath: socket,
+        method,
+        path: `${url.pathname}${url.search}`,
+        headers: sent === undefined ? {} : { 'content-type': 'application/json', 'content-length': Buffer.byteLength(sent) },
+      },
+      (res) => {
+        const status = res.statusCode ?? 500
+        const headers = new Headers()
+        for (const [key, value] of Object.entries(res.headers)) {
+          if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(', ') : value)
+        }
+        // A 204 or 304 has no body; a Response refuses one.
+        if (status === 204 || status === 304) {
+          res.resume()
+          resolve(new Response(null, { status, headers }))
+          return
+        }
+        // node:stream/web's ReadableStream is the web one at run time; their
+        // TypeScript declarations just don't line up.
+        resolve(new Response(Readable.toWeb(res) as unknown as ReadableStream, { status, headers }))
+      },
+    )
+    req.on('error', reject)
+    req.end(sent)
+  })
+}
+
 export class Docker {
   readonly socket: string
 
@@ -108,12 +146,7 @@ export class Docker {
     }
     let response: Response
     try {
-      response = await fetch(url, {
-        method,
-        unix: this.socket,
-        headers: options.body === undefined ? {} : { 'content-type': 'application/json' },
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      })
+      response = await overSocket(this.socket, method, url, options.body)
     } catch (error) {
       throw new DockerError(`can't reach Docker at ${this.socket}: ${error instanceof Error ? error.message : error}`)
     }
